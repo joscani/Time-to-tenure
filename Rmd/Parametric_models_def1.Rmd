@@ -1,5 +1,5 @@
 ---
-title: 'Survival modelling ot time to tenure : (using Def 1'
+title: 'Survival modelling ot time to tenure : (using Def 1)'
 author: "José Luis Cañadas Reche"
 date: "27/11/2014"
 output: html_document
