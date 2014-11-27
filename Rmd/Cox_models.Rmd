@@ -1,0 +1,446 @@
+---
+title: "Cox Models"
+author: "José Luis Cañadas Reche"
+date: "21/01/2015"
+output: html_document
+---
+
+```{r, warning=FALSE, echo=FALSE}
+library(foreign)
+datos <- read.dta("../data/working_10_Cleaner.dta")
+
+
+datos <- datos[,c("ability","Countryb","Q6","Q23","Q24","Q25","Q27",
+    					"Parenthood", "foreign", "foreignEdu2",
+						"multidisc", "TimePermCG5","PermanentCG5",
+						"mobilityPG24")]
+
+datos$Countryb <- droplevels(as.factor(as.character(datos$Countryb)))
+datos$Countryb <- relevel(datos$Countryb,ref="united kingdom")
+
+datos$time <- datos$TimePermCG5
+
+datos$status <- datos$PermanentCG5
+
+datos <- datos[!is.na(datos$time),]
+
+
+
+datos$time <- datos$time +0.001
+
+datos$Q6 <- droplevels(datos$Q6)
+
+```
+
+# Curvas de supervivencia por Kaplan-Meier
+
+Utilizamos la librería `survival` y `rms`
+
+```{r}
+library(survival)
+library(rms)
+```
+El objeto fundamental en análisis de supervivencia es `Surv(time,status)`
+
+```{r}
+S1 <- with(datos, Surv(time,status))
+```
+Un objeto de tipo Surv guarda atributos como que variables se han utilizado, el tipo de censura (right en este caso), etc.
+
+##  Función de supervivencia de toda la población
+
+Con survfit podemos obtener la curva de supervivencia utilizando el estimador de Kaplan-Meier. Nota (cambiamos por función npsurv de la librería rms que hace lo mismo, pero luego salen gráficos más claros)
+
+```{r, fig.width=5}
+survplot(npsurv(S1 ~ 1))
+
+```
+
+
+## Función de supervivencia según movilidad
+
+Con `survfit` también podemos ver si hay diferencias por movilidad.
+
+En primer lugar vemos las medias y medianas de time por movilidad
+
+
+
+Dibujamos las dos curvas de supervivencia
+
+```{r, fig.width=5}
+mod1 <- npsurv(S1 ~ mobilityPG24 , datos)
+mod1
+survplot(mod1, ylab=expression(hat(S)(t)))
+```
+
+**¿Son diferentes las curvas?**
+
+Utilizamos un log-rank test 
+*Harrington, D. P. and Fleming, T. R. (1982). A class of rank test procedures for censored survival data. Biometrika 69, 553-566.*
+
+```{r}
+survdiff(S1~ mobilityPG24 , datos)
+```
+
+## Función de supervivencia según disciplina
+
+
+Dibujamos las curvas de supervivencia
+
+```{r}
+# elijo una paleta de colores
+library(RColorBrewer)
+colores <- brewer.pal(6,"Dark2")
+
+```
+
+
+```{r, fig.width=5}
+mod2 <- npsurv(S1 ~ Q6 , datos)
+mod2
+survplot(mod2, col = colores, lwd = 2,
+         ylab = expression(hat(S)(t)),
+         time.inc = 5,
+         conf = "none", levels.only = TRUE)
+```
+
+**¿Son diferentes las curvas?**
+
+
+```{r}
+survdiff(S1 ~ Q6 , datos)
+```
+
+
+## Función de supervivencia según país
+
+
+Dibujamos las curvas de supervivencia
+
+```{r, echo=FALSE}
+# elijo una paleta de colores
+library(RColorBrewer)
+colores <- brewer.pal(10,"Paired")
+
+```
+
+
+```{r, fig.width=5}
+mod3 <- npsurv(S1 ~ Countryb , datos)
+mod3
+survplot(mod3, col = colores, lwd = 2,
+         ylab = expression(hat(S)(t)),
+         time.inc = 5,
+         conf = "none", levels.only = TRUE)
+```
+
+**¿Son diferentes las curvas?**
+
+
+```{r}
+survdiff(S1 ~ Countryb , datos)
+```
+
+Vamos a centrarnos en las variables de disciplina (Q6), movilidad (mobilityPG24) y país (Countryb)
+
+**Preguntar a Ana que categoría de referencia tomamos**
+
+```{r}
+table(datos$Q6)
+table(datos$Countryb)
+```
+
+Por ejemplo, vamos  a tomar Ciencias sociales que tiene 1623 encuestados y reino unido que tiene 1320 encuestas
+
+```{r}
+# Pongo social sciences como referencia. En countryb no hace falta pq uk ya es la referencia
+datos$Q6 <- relevel(datos$Q6, ref = "Social Sciences" )
+```
+
+
+
+```{r, warning=FALSE}
+# me quedo con datos 
+filtro <- !is.na(datos$Q6) & !is.na(datos$mobilityPG24)
+table(filtro)
+S1.nuevo <-  with(datos[filtro,], Surv(time,status))
+mod.cph <- coxph(S1.nuevo ~ Q6 * mobilityPG24 * Countryb, 
+    data = datos[filtro, ], method="breslow")
+
+mod.cph.step <- step(mod.cph)
+
+summary(mod.cph.step)
+```
+
+Nos quedan las mismas variables  que cuando hacíamos el modelo paramétrico
+
+### Interpretación
+
+Tenemos que fijarnos en los exp(coef), por ejemplo en el Reino Unido el riesgo de conseguir una plaza permanente para los de Medical Sciences que no se mueven es 0.7 menor que para los de Social sciences que no se mueven. O lo que es lo mismo los de Ciencias Sociales tienen un riesgo 1.3 veces mayor de obtener la plaza
+
+Se puede calcular el  hazard ratio (riesgo relativo) con respecto al individuo medio en la muestra utilizando `predict` (esto puede ser confuso). Si queremos calcular el hazard ratio entre dos individuos tenemos que tirar de los coeficientes del modelo
+
+
+Comparemos los perfiles: 
+
+* País: España Q6: social Sciences mobility:0
+* País: España Q6: social Sciences mobility:1
+
+```{r}
+coeficientes <- coef(mod.cph.step)
+data.frame(1:length(coeficientes), coeficientes)
+# España, sin movilidad y ciencias sociales
+perfil1 <- coeficientes[13]
+
+# España, movilidad, ciencias sociales 
+perfil2 <- coeficientes[6] + coeficientes[13] + coeficientes[22]
+
+(riesgo <- exp(perfil1)/exp(perfil2))
+
+
+```
+En España, para la disciplina de ciencias sociales el riesgo de conseguir la plaza es 1.53 veces mayor para los que no se mueven que para los que se mueven
+
+
+Comparemos uno de ciencias sociales español, que se mueve con uno de ciencias sociales en Alemania
+
+```{r}
+# Alemania, movilidad, ciencias sociales
+
+perfil3 <- coeficientes[6]+ coeficientes[9] + coeficientes[18]
+exp(perfil2) / exp(perfil3)
+```
+
+Puedo ver si son signitificativas las variables
+```{r}
+anova(mod.cph.step)
+```
+
+Comparamos el modelo con el estimador de kaplan Meier
+
+**Reino Unido, Social Sciences, movilidad vs no movilidad**
+```{r, echo=FALSE}
+## Plot KM curves
+
+res.km <- npsurv( Surv(time,status) ~ mobilityPG24 , data=datos[filtro & datos$Countryb=="united kingdom" & datos$Q6=="Social Sciences",])
+survplot(fit  = res.km,
+         conf = c("none","bands","bars")[1],
+         xlab = "", ylab = "Survival",
+#          label.curves = TRUE,                     # label curves directly
+         time.inc = 5,                          # time increment
+#          n.risk   = TRUE,                         # show number at risk
+         )
+
+## Plot Cox prediction (use survfit)
+lines(survfit(mod.cph.step,
+              newdata = data.frame(mobilityPG24 = 0:1,
+                        Q6=levels(datos$Q6)[1], Countryb=levels(datos$Countryb)[1])),
+      col = "darkred", lwd=1.2, lty = 1:2, mark.time = FALSE)
+
+legend(x = "topright",
+       legend = c("Kaplan-Meier", "Cox "),
+       lwd = 2, bty = "n",
+       col = c("black", "darkred"))
+
+```
+
+**España, Social Sciences, movilidad vs no movilidad**
+
+
+```{r, echo=FALSE}
+res.km <- npsurv( Surv(time,status) ~ mobilityPG24 , data=datos[filtro & datos$Countryb=="spain" & datos$Q6=="Social Sciences",])
+survplot(fit  = res.km,
+         conf = c("none","bands","bars")[1],
+         xlab = "", ylab = "Survival",
+#          label.curves = TRUE,                     # label curves directly
+         time.inc = 5,                          # time increment
+#          n.risk   = TRUE,                         # show number at risk
+         )
+
+## Plot Cox prediction (use survfit)
+lines(survfit(mod.cph.step,
+              newdata = data.frame(mobilityPG24 = 0:1,
+                        Q6=levels(datos$Q6)[1], Countryb="spain")),
+      col = "darkred", lwd=1.2, lty = 1:2, mark.time = FALSE)
+
+legend(x = "topright",
+       legend = c("Kaplan-Meier", "Cox "),
+       lwd = 2, bty = "n",
+       col = c("black", "darkred"))
+
+```
+
+## Asunciones del modelo
+
+En los modelos de cox (proportional hazards regression model) no importa cual sea la función de hazard base sino la relación entre las covariables. La hipótesis subyacente es que si tengo una covariable con dos niveles, sus respectivas curvas de supervivencia son *paralelas*, es decir, hay la misma distancia independientemente del valor del tiempo. Por eso al final, se dice que el riesgo para un individuo con X=1 es tantas veces el riesgo de un individuo con X=0, sea cual sea el instante del tiempo. 
+
+$$h(t)=h_{0}(t)\cdot\exp\left(\beta Z_{i}(t)\right)$$
+
+Si comparamos el $h(t)$ de dos individuos con valores distintos en las covariables $Z$ la función resultanto no depende de $h_{0}(t)$ sino sólo de las covariables. 
+
+Por eso hay que confirmar esa asunción. Tenemos un test 
+
+```{r}
+test.asun <- cox.zph(mod.cph.step, transform="rank")
+round(test.asun$table,3)
+
+```
+Y no se cumple la asunción (los p-values deberían ser >0.05), aunque puedo hacer la corrección de bonferroni al hacer varios contrastes simultáneamente
+
+```{r}
+round(p.adjust(test.asun$table[,3], method = "bonferroni"),3)
+```
+
+Para Alemania e Italia no se cumple esta asunción, ni para algunas categorías de Q6, lo que indica que las curvas de supervivencia en esas categorías no son paralelas a las otras. Hay que investigar soluciones, una puede ser estratificar por país y por disciplina. Otra (más compleja) es considerar que el efecto de esas covariables varía con el tiempo.
+
+
+### Estratificanco por país
+
+Considero estratificar por país 
+
+```{r}
+mod.cph.strat <- coxph(S1.nuevo ~ Q6 + mobilityPG24 + strata(Countryb), 
+    data = datos[filtro, ], method = "breslow")
+test.asun <- cox.zph(mod.cph.strat, transform="rank")
+round(test.asun$table,3)
+round(p.adjust(test.asun$table[,3], method = "bonferroni"),3)
+
+mod.cph.strat2 <- coxph(S1.nuevo ~ Q6 + mobilityPG24 * strata(Countryb), 
+    data = datos[filtro, ], method = "breslow")
+
+anova(mod.cph.strat, mod.cph.strat2)
+```
+
+Estratifico por país y por disciplina
+
+
+```{r}
+mod.cph.strat3 <- coxph(S1.nuevo ~  mobilityPG24 * strata(Countryb)+  strata(Q6), 
+    data = datos[filtro, ], method = "breslow")
+
+test.asun <- cox.zph(mod.cph.strat3, transform="rank")
+
+round(test.asun$table,3)
+round(p.adjust(test.asun$table[,3], method = "bonferroni"),3)
+
+mod.cph.strat31 <- coxph(S1.nuevo ~  mobilityPG24 + strata(Countryb)+ strata(Q6), 
+    data = datos[filtro, ], method = "breslow")
+anova(mod.cph.strat3, mod.cph.strat31)
+```
+
+Algo pasa con los datos de Italia..
+```{r}
+summary(mod.cph.strat3)
+```
+
+Veamos la curva de supervivencia por kaplan-meier para los datos de Italia.
+
+
+```{r}
+survplot(npsurv(Surv(time,status)~ mobilityPG24 , datos[datos$Countryb=="italy",]),conf="none")
+```
+
+Estos gráficos deberían ir al principio para orientar por dónde deben ir los modelos
+
+```{r, fig.width=10, fig.height=9}
+par(mfrow=c(3,3))
+lapply(1:10, function(x){
+                        survplot(
+                            npsurv(Surv(time,status)~ mobilityPG24 ,
+                            datos[datos$Countryb==levels(datos$Countryb)[x],]),
+                            xlim = c(0,40),
+                            time.inc = 2,    
+                            conf="none" 
+                            )
+                        title(main=toupper(levels(datos$Countryb)[x]))
+                        }
+       )
+
+```
+
+```{r,fig.width=10}
+par(mfrow=c(2,3))
+lapply(1:6, function(x){
+                        survplot(
+                            npsurv(Surv(time,status)~ mobilityPG24 ,
+                            datos[datos$Q6==levels(datos$Q6)[x],]),
+#                             xlim = c(0,40),
+                            time.inc = 2,    
+                            conf="none"
+                            )
+                        title(main=toupper(levels(datos$Q6)[x]))
+                        }
+       )
+
+```
+
+**Me surgen preguntas que podrían mejorar el tema**
+
+¿Una redefinición del tiempo? ¿Quedarnos sólo con los que haya pasado menos de 20 años, menos de 10? ¿Ponemos a lso que hayan pasado x tiempo como datos censurados, ie, asignarles status=0? Echar una pensada..
+
+La tabla de time y status para ver por dónde podríamos cortar
+
+```{r}
+ with(datos, table(time, status))
+```
+
+
+## Quitando Italia de los datos 
+
+
+
+```{r}
+aux <- datos[filtro & datos$Countryb!="italy",]
+aux$Countryb <- droplevels(aux$Countryb)
+S2 <- with(aux,Surv(time,status))
+```
+
+```{r}
+mod.noitaly1 <- coxph(S2 ~  mobilityPG24 * strata(Countryb)+ strata(Q6) , 
+    data = aux, method = "breslow")
+
+test.asun <- cox.zph(mod.noitaly1, transform="rank", global=FALSE)
+
+round(test.asun$table,3)
+round(p.adjust(test.asun$table[,3], method = "bonferroni"),3)
+
+```
+
+```{r}
+
+anova(mod.noitaly1)
+
+mod.noitaly2 <- coxph(S2 ~  mobilityPG24 + strata(Countryb)+ strata(Q6) , 
+    data = aux, method = "breslow")
+
+anova(mod.noitaly2, mod.noitaly1)
+```
+El anova nos dice que no sería necesaria la interacción entre movilidad y país. 
+
+```{r}
+summary(mod.noitaly2)
+```
+Se tiene que el hazard ratio es 1.26 veces mayor para los que no se mueven.. Estos resultados están en línea con los obtenidos anteriormente
+
+Ahora comprobamos el modelo sin estratificar por Q6 con el que estratifica por Q6
+```{r}
+mod.noitaly3 <- coxph(S2 ~  mobilityPG24 + strata(Countryb)+ Q6 , 
+    data = aux, method = "breslow")
+
+anova(mod.noitaly3, mod.noitaly2)
+```
+
+Es mejor estratificar por Q6 
+
+
+
+```{r}
+dat1 <-  expand.grid(levels(aux$Q6), levels(aux$Countryb), 0:1)
+names(dat1) <- c("Q6", "Countryb", "mobilityPG24")
+dat1 <- dat1[!(dat1$Countryb=="netherlands" & dat1$Q6=="Agricultural Sciences"),]
+predict(mod.noitaly2, newdata=dat1, type="risk")
+```
+
+
+
+

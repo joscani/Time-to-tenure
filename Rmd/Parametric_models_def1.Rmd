@@ -1,5 +1,5 @@
 ---
-title: 'Survival modelling ot time to tenure : (using Def 1)'
+title: 'Survival modelling.  time to tenure : (using Def 1)'
 author: "José Luis Cañadas Reche"
 date: "27/11/2014"
 output: html_document
@@ -297,6 +297,95 @@ mod5 <- survreg(S1 ~ Q6_rec, data=datos)
 anova(mod4,mod5)
 ```
 Al ser el p_valor mayor de 0.5 significa que ambos modelos son equivalentes y está justificado unir esas categorías. 
+
+El resument del modelo 
+
+```{r}
+summary(mod5)
+
+```
+Tomamos como referencia "Social Sciences", para ver si hay diferencias
+
+```{r}
+datos$Q6_rec2 <- relevel(datos$Q6_rec,ref="Social Sciences")
+
+mod6 <- survreg(S1 ~ Q6_rec2, data=datos)
+```
+
+Tomamos ahora  como referencia "Humanities "
+
+```{r}
+datos$Q6_rec3 <- relevel(datos$Q6_rec, ref = "Humanities")
+
+mod7 <- survreg(S1 ~ Q6_rec3, data=datos)
+summary(mod7)
+
+round(summary(mod7)$table, 3)
+
+```
+
+Y vemos que no hay diferencias entre Humanities y Engineering and Technology. Unimos a ver 
+
+```{r}
+datos$Q6_rec4 <- datos$Q6_rec3
+levels(datos$Q6_rec4)
+levels(datos$Q6_rec4)[c(1,3)] <- "Grupo2"
+levels(datos$Q6_rec4)
+
+```
+Ajustamos un nuevo modelo y vemos si es equivalente a mod7
+
+```{r}
+mod8 <- survreg(S1 ~ Q6_rec4, data=datos)
+anova(mod7, mod8)
+```
+Resumen
+
+```{r}
+
+summary(mod8)
+
+```
+
+En grupo 2, que está como referencia (lo podemos cambiar ) están *Humanities* y *Engineering and Technology*. En grupo 1 están *Agricultural Sciences* con *Medical Sciences* y *Natural Sciences* y Ciencias sociales va por su cuenta. 
+
+La curva de supervivencia empírica es
+
+```{r}
+plot(survfit(S1 ~ Q6_rec4, datos), lwd=2, col=colores[c(1,4,5)])
+survfit(S1 ~ Q6_rec4, datos)
+
+```
+
+
+## Próximos pasos
+
+* Añadir otras variables
+
+```{r}
+
+mod9 <- survreg(S1 ~ Q6_rec4 + ability + Countryb + Q23 + Q24 + Q25 +
+                    Q27 + foreign + multidisc + mobilityPG2 , datos)
+
+```
+
+survreg() fits accelerated failure models, not proportional
+hazards models.   The coefficients are logarithms of ratios of
+survival times, so a positive coefficient means longer survival.
+
+Utilizamos `step` para seleccionar variables.
+
+**Ojo**   hay muchos perdidos en algunas variables y al considerar el modelo , nos quedamos con menos de 2000 casos
+
+```{r}
+step(mod9)
+```
+
+
+
+
+
+
 
 
 

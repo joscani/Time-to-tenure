@@ -1,0 +1,152 @@
+---
+title: "Cox Models  time to tenure : last_degree_land "
+author: "José Luis Cañadas Reche"
+date: "Julio 2015"
+output: html_document
+---
+
+```{r, warning=FALSE, echo=TRUE}
+library(foreign)
+datos <- read.dta("../data/working_10_Cleaner.dta")
+
+datos <- datos[,c("ability","Countryb","Q6","Q23","Q24","Q25","Q27",
+    					"Parenthood", "foreign", "foreignEdu2",
+						"multidisc", "TimePermCG","PermanentCG",
+						"TimePermCG5","PermanentCG5","TimePermCG7","PermanentCG7","last_degree_land",
+						"mobilityPG2", "mobilityPG24" ,"mobilityPDurG2" )]
+
+datos$Countryb <- droplevels(as.factor(as.character(datos$Countryb)))
+datos$Countryb <- relevel(datos$Countryb,ref="united kingdom")
+datos$last_degree_land <- droplevels(as.factor(as.character(datos$last_degree_land)))
+
+# Me quedo con last_degree_land más de 150 casos
+
+(paises_mas_150 <- names(table(datos$last_degree_land))[table(datos$last_degree_land)>=150])
+
+nrow(datos)
+datos <- datos[datos$last_degree_land %in% paises_mas_150, ]
+# nos quedamos con menos datos, perdemos 411 casos
+nrow(datos)
+
+
+datos$last_degree_land <- droplevels(datos$last_degree_land)
+
+
+```
+
+# Definiciones de time y permanent
+
+Tomo diferentes definiciones de time y permanent.
+
+```{r}
+datos$time1 <- datos$TimePermCG
+datos$status1 <- datos$PermanentCG
+
+datos$time2 <- datos$TimePermCG5
+datos$status2 <- datos$PermanentCG5
+
+datos$time3 <- datos$TimePermCG7
+datos$status3 <- datos$PermanentCG7
+
+datos <- datos[!is.na(datos$time1),]
+
+
+# añado un número pequeño para no tener tiempos iguales a 0. 
+datos$time1 <- datos$time1 +0.001
+datos$time2 <- datos$time2 +0.001
+datos$time3 <- datos$time3 +0.001
+
+datos$Q6 <- droplevels(datos$Q6)
+
+```
+
+# Curvas de supervivencia  por Kaplan-Meier
+
+
+Utilizamos la librería `survival` y `rms`
+
+```{r}
+library(survival)
+library(rms)
+```
+
+
+Veamos las curvas de Kaplan Meier en cada país según movilidad y  por definición de tiempo hasta la permanencia.
+Hay que tener en cuenta también que la variable  de movilidad es diferente en cada caso.
+
+**Definición1**
+Time : TimePermCG
+Movilidad: mobilityPG2
+
+```{r, fig.width=10, fig.height=9, message=FALSE, error=FALSE}
+par(mfrow=c(2,2))
+lapply(1:nlevels(datos$last_degree_land), function(x){
+                        survplot(
+                            npsurv(Surv(time1,status1)~ mobilityPG2 ,
+                            datos[datos$last_degree_land==levels(datos$last_degree_land)[x],]),
+                            xlim = c(0,40),
+                            # n.risk=TRUE,
+                            time.inc = 2
+                            ,
+                            conf="none" 
+                            )
+                        title(main=toupper(levels(datos$last_degree_land)[x]), 
+                              sub = "TimePermCG")
+                        }
+       )
+
+```
+
+
+
+**Definición2**
+Time : TimePermCG5
+Movilidad: mobilityPG24
+
+```{r, fig.width=10, fig.height=9, message=FALSE, error=FALSE}
+par(mfrow=c(2,2))
+lapply(1:10, function(x){
+                        survplot(
+                            npsurv(Surv(time2,status2)~ mobilityPG24 ,
+                            datos[datos$last_degree_land==levels(datos$last_degree_land)[x],]),
+                            xlim = c(0,40),
+                            # n.risk=TRUE,
+                            time.inc = 2
+                            ,
+                            conf="none" 
+                            )
+                        title(main=toupper(levels(datos$last_degree_land)[x]), 
+                              sub = "TimePermCG5")
+                        }
+       )
+
+```
+
+
+
+
+**Definición3**
+Time : TimePermCG7
+Movilidad: mobilityPDurG2
+
+
+```{r, fig.width=10, fig.height=9, message=FALSE, error=FALSE}
+par(mfrow=c(2,2))
+lapply(1:10, function(x){
+                        survplot(
+                            npsurv(Surv(time3,status3)~ mobilityPDurG2
+ ,
+                            datos[datos$last_degree_land==levels(datos$last_degree_land)[x],]),
+                            xlim = c(0,40),
+                            # n.risk=TRUE,
+                            time.inc = 2
+ ,
+                            conf="none" 
+                            )
+                        title(main=toupper(levels(datos$last_degree_land)[x]), 
+                              sub = "TimePermCG5")
+                        }
+       )
+
+```
+

@@ -1,0 +1,190 @@
+---
+title: "Cox Models  time to tenure : (using Def 3)"
+author: "José Luis Cañadas Reche"
+date: "Julio 2015"
+output: html_document
+---
+
+```{r, warning=FALSE, echo=TRUE}
+library(foreign)
+datos <- read.dta("../data/working_10_Cleaner.dta")
+
+datos <- datos[,c("ability","Countryb","Q6","Q23","Q24","Q25","Q27",
+    					"Parenthood", "foreign", "foreignEdu2",
+						"multidisc", "TimePermCG","PermanentCG",
+						"TimePermCG5","PermanentCG5","TimePermCG7","PermanentCG7",
+						"mobilityPG2", "mobilityPG24" ,"mobilityPDurG2" )]
+
+datos$Countryb <- droplevels(as.factor(as.character(datos$Countryb)))
+datos$Countryb <- relevel(datos$Countryb,ref="united kingdom")
+
+
+
+```
+
+# Definiciones de time y permanent
+
+Tomo diferentes definiciones de time y permanent.
+
+```{r}
+datos$time1 <- datos$TimePermCG
+datos$status1 <- datos$PermanentCG
+
+datos$time2 <- datos$TimePermCG5
+datos$status2 <- datos$PermanentCG5
+
+datos$time3 <- datos$TimePermCG7
+datos$status3 <- datos$PermanentCG7
+
+datos <- datos[!is.na(datos$time1),]
+
+
+# añado un número pequeño para no tener tiempos iguales a 0. 
+datos$time1 <- datos$time1 +0.001
+datos$time2 <- datos$time2 +0.001
+datos$time3 <- datos$time3 +0.001
+
+datos$Q6 <- droplevels(datos$Q6)
+
+```
+
+# Curvas de supervivencia  por Kaplan-Meier
+
+
+Utilizamos la librería `survival` y `rms`
+
+```{r}
+library(survival)
+library(rms)
+```
+
+
+Veamos las curvas de Kaplan Meier en cada país según movilidad y  por definición de tiempo hasta la permanencia.
+Hay que tener en cuenta también que la variable  de movilidad es diferente en cada caso.
+
+**Definición1**
+Time : TimePermCG
+Movilidad: mobilityPG2
+
+```{r, fig.width=10, fig.height=9, message=FALSE, error=FALSE}
+par(mfrow=c(2,2))
+lapply(1:10, function(x){
+                        survplot(
+                            npsurv(Surv(time1,status1)~ mobilityPG2 ,
+                            datos[datos$Countryb==levels(datos$Countryb)[x],]),
+                            xlim = c(0,40),
+                            # n.risk=TRUE,
+                            time.inc = 2
+#                             ,
+#                             conf="none" 
+                            )
+                        title(main=toupper(levels(datos$Countryb)[x]), 
+                              sub = "TimePermCG")
+                        }
+       )
+
+```
+
+Puff. Pues con esta definición se ven cosas interesantes. 
+
+Reino Unido: Prácticamente no hay diferencias entre movilidad y no. Si acaso de 0 a 5 años desde terminar el doctorado parece que moverse es peor, la curva está por encima, es decir, hay más % de supervivientes (gente sin plaza) entre los que se mueven que entre los que no.
+
+Bélgica: En los primeros años desde el doctorado moverse incrementa la probabilidad de tener plaza pero a partir de 6 años es al revés.
+
+Francia: Moverse es siempre peor que quedarse y se ven dos curvas claramente separadas
+
+Alemania: Curvas parecidas, pero moverse es mejor. Curva de los que se mueven está por debajo lo que implica que obtienen la plaza antes. 
+
+Italia: Pasa igual que en Alemania. Moverse es mejor
+
+Holanda. No se observarn diferencias.
+
+Polonia. Moverse es claramente mejor.
+
+España: El que se fue a Sevilla perdió su silla. Claramente es el país dónde más se penaliza la movilidad.
+
+Suecia. No se aprecian diferencias. salvo quizá a partir de 10 años desde el doctorado, dónde es menor la probabilidad para los que se mueven.
+
+Suiza. No se aprecian diferencias. 
+
+**Definición2**
+Time : TimePermCG5
+Movilidad: mobilityPG24
+
+```{r, fig.width=10, fig.height=9, message=FALSE, error=FALSE}
+par(mfrow=c(2,2))
+lapply(1:10, function(x){
+                        survplot(
+                            npsurv(Surv(time2,status2)~ mobilityPG24 ,
+                            datos[datos$Countryb==levels(datos$Countryb)[x],]),
+                            xlim = c(0,40),
+                            # n.risk=TRUE,
+                            time.inc = 2
+#                             ,
+#                             conf="none" 
+                            )
+                        title(main=toupper(levels(datos$Countryb)[x]), 
+                              sub = "TimePermCG5")
+                        }
+       )
+
+```
+
+Reino Unido: Es peor moverse
+Bélgica: Es peor moverse
+
+Francia: Peor moverse
+Alemania: Da igual
+
+Italia: Pocas diferencias
+Holanda: Peor moverse
+
+Polonia: Pocas diferencias.
+España: Peor moverse,claramente.
+
+Suecia. Pocas diferencias al principi y luego peor moverse
+Suiza. Peor moverse. 
+
+
+
+**Definición3**
+Time : TimePermCG7
+Movilidad: mobilityPDurG2
+
+
+```{r, fig.width=10, fig.height=9, message=FALSE, error=FALSE}
+par(mfrow=c(2,2))
+lapply(1:10, function(x){
+                        survplot(
+                            npsurv(Surv(time3,status3)~ mobilityPDurG2
+ ,
+                            datos[datos$Countryb==levels(datos$Countryb)[x],]),
+                            xlim = c(0,40),
+                            # n.risk=TRUE,
+                            time.inc = 2
+ # ,
+                            # conf="none" 
+                            )
+                        title(main=toupper(levels(datos$Countryb)[x]), 
+                              sub = "TimePermCG5")
+                        }
+       )
+
+```
+
+Reino Unido: Es peor moverse
+Bélgica: Es peor moverse
+
+Francia: Peor moverse
+Alemania: Da igual al principio, lueog peor moverse
+
+Italia: Pocas diferencias, y al principio mejor moverse y luego peor
+Holanda: Peor moverse
+
+Polonia: Pocas diferencias, y peor moverse. Contradictorio con la def1
+
+España: Peor moverse,claramente.
+
+Suecia. Claramente peor moverse. Con def1 y def2 no había diferencias prácticamente
+
+Suiza. Peor moverse. 

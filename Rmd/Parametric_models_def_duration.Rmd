@@ -1,0 +1,503 @@
+---
+title: 'Survival modelling.  time to tenure : (using Def Duration)'
+author: "José Luis Cañadas Reche"
+date: "04/02/2015"
+output: html_document
+---
+
+## Variables
+
+nombre | descripcion
+------ | -----------
+TimePermCG7 | Tiempo permanencia
+PermanentCG7 | variable de status: 1 tiene la plaza
+mobilityPDurG2 | Movilidad
+Q6 | dicipline
+Q23 | Sex
+Q24 | Age
+Q25 | Single
+Q27 | Children (ver variable Parenthood tb )
+Countryb | Country
+foreign | Extranjero
+foreignEdu2 | Si te has educado en un país extranjero
+multidisc | Mobility disciplinar
+publ_prod2 | Publications
+
+Nota sobre survreg: 
+survreg() fits accelerated failure models, not proportional
+hazards models.   The coefficients are logarithms of ratios of
+survival times, so a positive coefficient means longer survival.
+
+Nota para mi: utilizar función survplot dentro de la librería rms, ver http://rstudio-pubs-static.s3.amazonaws.com/5564_bc9e2d9a458c4660aa82882df90b7a6b.html
+## Lectura de datos desde fichero de stata
+
+Con la librería foreign podemos leer datos de spss, stata, etc.
+
+```{r, warning=FALSE}
+library(foreign)
+datos <- read.dta("../data/working_10_Cleaner.dta")
+head( names(datos))
+```
+
+Nos quedamos sólo con las variables que nos hacen falta
+
+```{r}
+datos <- datos[,c("ability","Countryb","Q6","Q23","Q24","Q25","Q27",
+						"Parenthood", "foreign", "foreignEdu2",
+						"multidisc", "TimePermCG7","PermanentCG7",
+						"mobilityPDurG2")]
+```
+
+La variable Countryb tiene como niveles todos los países, elimino las etiquetas de países que no están en los datos y elijo UK como el país de referencia 
+
+```{r}
+datos$Countryb <- droplevels(as.factor(as.character(datos$Countryb)))
+datos$Countryb <- relevel(datos$Countryb,ref="united kingdom")
+```
+
+Defino la variable time como TimePermCG y status como PermanentCG
+
+```{r}
+datos$time <- datos$TimePermCG7
+
+datos$status <- datos$PermanentCG7 
+
+```
+Comprobamos si hay casos perdidos 
+
+```{r}
+sum( is.na( datos$time))
+sum( is.na( datos$status))
+
+```
+
+Eliminamos los perdidos en time
+
+```{r}
+datos <- datos[!is.na(datos$time),]
+
+```
+
+Tenemos observaciones censuradas, es decir, entrevistados que no han obtenido la plaza ni sabemos cuando la obtendrán. Unas `r sum(datos$status==0)`
+
+```{r}
+table(datos$status)
+
+```
+
+Por otro lado también tenemos entrevistados que en time=0 ya tienen la plaza (status=1), una posible solución es sumar 0.5 a time. Hay `r sum(datos$status==1 & datos$time==0)` casos así
+```{r}
+ head(with(datos, table(time, status)),10)
+```
+
+sumamos 0.001 a time (es por cuestión de cálculos)
+
+```{r}
+datos$time <- datos$time +0.001
+```
+
+En la variable de ability tengo `r sum(datos$ability<0, na.rm=T)` valores inferiores a 0, preguntar a Ana sobre esta variable, como está construida y si tiene sentido que sea menor que 0. También hay `r sum(is.na(datos$ability))` casos perdidos en esta variable
+
+```{r}
+table(datos$ability<0, exclude = NULL)
+
+```
+Eliminar niveles sobrantes en Q6 (disciplina)
+
+```{r}
+table(datos$Q6)
+datos$Q6 <- droplevels(datos$Q6)
+
+table(datos$Q6)
+```
+
+
+# Curvas de supervivencia por Kaplan-Meier
+
+Utilizamos la librería `survival` 
+
+```{r}
+library(survival)
+library(rms)
+```
+El objeto fundamental en análisis de supervivencia es `Surv(time,status)`
+
+```{r}
+S1 <- with(datos, Surv(time,status))
+```
+Un objeto de tipo Surv guarda atributos como que variables se han utilizado, el tipo de censura (right en este caso), etc.
+
+```{r}
+attributes(S1)
+```
+
+Si vemos los primeros valores, la cruz puesta después de un número indica que ese individuo está censurado, no tiene plaza en el momento en que se le entrevistó, ni sabemos cuando la obtendrá, pero se puede utilizar para el análisis, ya que sabemos que han pasado x ¿años? y todavía no la tiene
+
+```{r}
+S1[1:20]
+```
+Si lo vemos en los datos, vemos que el caso 3 no ha obtenido la plaza (status=0)
+
+```{r}
+
+datos[1:11, c("time","status")]
+
+```
+
+##  Función de supervivencia de toda la población
+
+Con survfit podemos obtener la curva de supervivencia utilizando el estimador de Kaplan-Meier. Nota (cambiamos por función npsurv de la librería rms que hace lo mismo, pero luego salen gráficos más claros)
+
+```{r, fig.width=5}
+survplot(npsurv(S1 ~ 1))
+
+```
+
+Seleccionando time entre 0 y 20
+
+```{r, fig.width=5}
+plot(npsurv(S1 ~ 1,), xlim=c(0,20))
+```
+
+## Función de supervivencia según movilidad
+
+Con `survfit` también podemos ver si hay diferencias por movilidad.
+
+En primer lugar vemos las medias y medianas de time por movilidad
+
+```{r}
+# todos datos, incluyendo los censurados
+with(datos, tapply(time,mobilityPDurG2, function(x)c(media=mean(x),mediana=median(x))))
+
+# solo lso que tienen status=1
+
+with(datos[datos$status==1,], tapply(time,mobilityPDurG2, function(x)c(media=mean(x),mediana=median(x))))
+
+```
+Si se observan diferencias,con mobility=0 hay menos survival, es decir, la gente que no se mueve obtiene la plaza antes. (obtener plaza es el evento modelado, seguir survival significa seguir sin plaza)
+
+Dibujamos las dos curvas de supervivencia
+
+```{r, fig.width=5}
+mod1 <- npsurv(S1 ~ mobilityPDurG2 , datos)
+survplot(mod1, ylab=expression(hat(S)(t)))
+```
+
+
+Para cada time y en cada categoría de mobilityPDurG2, se ha calculada el valor de survival y el intervalo de confianza. No se aprecian diferencias entre movilidad 0 y movilidad 1
+
+```{r}
+
+summary(mod1)
+
+```
+
+Para ver el tiempo mediano hasta obtener la plaza se puede ver 
+
+```{r}
+mod1
+
+```
+Conclusión: En principio si hay diferncias según movilidad.
+
+```{r}
+
+survdiff(S1 ~ mobilityPDurG2 , datos)
+
+```
+
+
+## Función de supervivencia según disciplina
+```{r}
+# todos datos, incluyendo los censurados
+with(datos, tapply(time,Q6, function(x)c(media=mean(x),mediana=median(x))))
+
+# solo lso que tienen status=1
+
+with(datos[datos$status==1,], tapply(time,Q6, function(x)c(media=mean(x),mediana=median(x))))
+
+```
+
+Dibujamos las curvas de supervivencia
+
+```{r}
+# elijo una paleta de colores
+library(RColorBrewer)
+colores <- brewer.pal(10,"Set3")
+
+```
+
+
+```{r, fig.width=5}
+mod2 <- npsurv(S1 ~ Q6 , datos)
+survplot(mod2, col = colores[1:6],
+         ylab = expression(hat(S)(t)),
+         time.inc = 5,
+         conf = "none")
+```
+
+
+
+```{r}
+
+summary(mod2)
+
+```
+
+Para ver el tiempo mediano hasta obtener la plaza se puede ver 
+
+```{r}
+mod2
+
+```
+Si parece que según la disciplina las curvas de supervivencia son distintas, podríamos pensar en ir ajustando modelos de regresión paramétricos
+
+# Modelos paramétricos con survreg
+
+Con `survreg` podemos construir modelos paramétricos (la otra opción son los semiparamétricos como los de regresión de cox)
+
+Se pueden considerar varias distribuciones para la distribución del riesgo según se incrementa el tiempo (age-specific hazard models). Sólo pongo la exponencial y la weibull
+
+
+Distribución | Riesgo (hazard)
+------------ | ---------------
+Exponencial  | $constante = \dfrac{1}{\mu} = \lambda$
+Weibull 		 | $\alpha\lambda\left(\lambda t\right)^{\alpha-1}$
+
+La distribución Weibull es la más flexible ya que puede tratar co *hazards* que se incrementan con el tiempo de forma aceleraca $(\alpha >1)$ o decelerada $(\alpha<1)$
+
+Veamos en primer lugar el modelo con var indep las disciplinas y dist exponencial. 
+La categoría de referencia de **Q6** es *Agricultural Sciences* 
+
+```{r}
+mod3 <- survreg(S1 ~ Q6, data=datos, dist ="exponential")
+summary(mod3)
+```
+
+La tabla con los coeficientes y p-valores, redondeando a 3 decimales
+
+```{r}
+round(summary(mod3)$table,3)
+```
+
+Bajo la hipótesis de errores exponenciales, vemos que la disciplina no influye en la supervivencia (**_con las otras definiciones si pasaba_**) 
+
+Antes de considerar si agrupamos categorías, veamos si es mejor considerar una distribución Weibull
+
+
+```{r}
+# la Weibull es la distribución por defecto en survreg y no hace falta especificarlo
+mod4 <- survreg(S1 ~ Q6, data=datos)
+summary(mod4)
+round(summary(mod4)$table,4)
+
+anova(mod3,mod4)
+```
+
+
+## Interacción entre mobility y Discipline
+
+```{r}
+mod8 <- survfit(S1 ~ Q6 + mobilityPDurG2, data = datos)
+plot(mod8, col=colores, lty=c(rep(1,2),rep(2,2),rep(3,2),rep(4,2), rep(5,2),
+                              rep(6,2)), lwd=c(rep(2,6),rep(3,6)))
+```
+
+Veamos las medianas calculadas por survfit y sus intervalos de confianza
+
+```{r}
+mod8
+```
+
+
+### Utilizando survreg 
+
+Nota: Añado Countryb, considero la triple interacción y uso step para ver que interacción es  significativa
+
+```{r}
+
+mod9 <- survreg(S1 ~ Q6 * mobilityPDurG2 * Countryb  , datos)
+mod9.step <- step(mod9)
+```
+
+El procedimiento por pasos nos dice que la interacción significativa es la de movilidad y país. Esto va en línea con lo que pensábamos, la movilidad influye sobre los tiempos hasta conseguir la plaza de manera diferente en cada país..( **_pasa igual que con las anteriores definiciones_**) 
+
+```{r}
+summary(mod9.step)
+round(summary(mod9.step)$table, 3)
+```
+
+Las categorías de referencia en cada variable son Social Sciences para Q6, 0 para mobilityPDurG2 y United Kingdom para Countryb.. Lo podemos cambiar según que nos interese tener en cada categoría
+
+Interpretaciones:
+
+Pdte de hacer  
+
+
+```{r}
+
+# modelo 9 por kaplan meier
+
+res.km <- 
+## Define a function to plot survreg prediction by 
+
+survreg.curves <- function(model, col = "black",
+                           toPredict,
+                           seq.quantiles = seq(from = 0.00, to = 0.97, by = 0.01),...) {
+
+    x = predict(model, newdata=toPredict,
+                type="quantile",
+                p = seq.quantiles)
+    rownames(x) <- paste0("mobility = ",toPredict$mobilityPDurG2, " ,Discipline = ", toPredict$Q6, ", Country = ", toPredict$Countryb )  
+    y = 1-seq.quantiles
+    plot(x[1,],y,type="n", xlab="time", ylab="Survival", axes=F,xlim=c(0,20),...)
+    axis(1)
+    axis(2, at=c(0,0.25, 0.5, 0.75, 1))
+    
+    plotlines <- function(t){
+        lines(x=t, y=y,...)
+        
+    }
+    apply(x,1, plotlines)
+
+}
+
+```
+
+
+```{r}
+# seleccionamos de los datos, los que sean Social Sciences, movilidad 1 y 
+# que pertenezcan a Uk y a Spain
+
+dat1 <-  data.frame(Q6 = "Social Sciences", mobilityPDurG2 = c(0,1),
+                         Countryb = "spain" )
+
+dat1
+
+survreg.curves(mod9.step, toPredict = dat1, main="mobility Yes vs No\n in Social Sciences in Spain")
+
+predict(mod9.step, newdata=dat1, type="response")
+# 
+dat2 <- data.frame(Q6 = "Social Sciences", mobilityPDurG2 = c(0,1),
+                         Countryb = "united kingdom" )
+dat2 
+
+survreg.curves(mod9.step, toPredict = dat2, main="mobility Yes vs No\n in Social Sciences in United kingdom")
+
+predict(mod9.step, newdata=dat2, type="response")
+
+dat3 <- data.frame(Q6 = c("Social Sciences"),
+                   mobilityPDurG2 = c(0,1),
+                         Countryb = "italy" )
+
+dat3
+predict(mod9.step, newdata=dat3, type="response")
+survreg.curves(mod9.step, toPredict=dat3)
+```
+
+
+Otra forma de pintarlo. Con la definición matemática
+
+Comparamos movilidad frente no movilidad para los de agricultural sciences en reino unido. Como no hay interacción entre disciplina y movilididad, la separación entre curvas será la misma para  las otras disciplinas en el Reino Unido.  
+
+```{r}
+
+# Curva supervivencia estimada para la cat de referencia (Uk, agricultural sciences, no movilidad)
+curve(exp(-(exp(-mod9.step$coef[1]) * x)^(1/mod9.step$scale)),from=0, to=20,
+        col="red", main="Survival curve for Uk, \nin agricultural sciences discipline", xlab="Time", ylab = "Survival estimate")
+
+# Comparamos los mismos con movilidad
+curve(exp(-(exp(-mod9.step$coef[1]-mod9.step$coef[7]) * x)^(1/mod9.step$scale)),
+      from=0, to = 20,
+        col="blue",add=TRUE)
+
+legend("topright",c("No mobility", " Mobility"), col=c("red","blue"),lwd=2)
+
+```
+
+
+```{r}
+
+# Curva supervivencia estimada para la cat Spain,  Social sciences, no movilidad)
+curve(exp(-(exp(-mod9.step$coef[1] - mod9.step$coef[6]- mod9.step$coef[14]) * x)^(1/mod9.step$scale)),from=0, to=20,
+        col="red", main="Survival curve for Spain, \nin Social sciences discipline", xlab="Time", ylab = "Survival estimate")
+
+# Comparamos los mismos con movilidad
+curve(exp(-(exp(-mod9.step$coef[1] - mod9.step$coef[6]- mod9.step$coef[14]-mod9.step$coef[7]-mod9.step$coef[23]) * x)^(1/mod9.step$scale)),
+      from=0, to = 20,
+        col="blue",add=TRUE)
+
+legend("topright",c("No mobility", " Mobility"), col=c("red","blue"),lwd=2)
+
+```
+
+En Italia, las curvas de supervivencia son más parecidas, pero se invierte la relación, los que no se mueven tienen mayor supervivencia, es decir, obtienen la plaza después de los que se mueven. 
+
+Si nos fijamos en los coeficientes el de movilidad es de 0.75 y el de la interacción entre Italia y movilidad es de -1.07, con lo que en Italia el coef de movilidad es negativo e implica menos supervivencia (mayor probabilidad de tener la plaza antes) para los que se mueven. Esto también pasa en Alemania y Polonia , ambas con -0.79, pero en estos casos hacen que las curvas sean casi iguales para los que se mueven que para los que no.
+En el otro extremo están países como España o Bélgica.
+
+```{r}
+# Curva supervivencia estimada para la cat Italia,  Social sciences, no movilidad)
+curve(exp(-(exp(-mod9.step$coef[1] - mod9.step$coef[6]- mod9.step$coef[11]) * x)^(1/mod9.step$scale)),from=0, to=20,
+        col="red", main="Survival curve for Italy, \nin Social sciences discipline", xlab="Time", ylab = "Survival estimate")
+
+# Comparamos los mismos con movilidad
+curve(exp(-(exp(-mod9.step$coef[1] - mod9.step$coef[6]- mod9.step$coef[11]-mod9.step$coef[7]-mod9.step$coef[20]) * x)^(1/mod9.step$scale)),
+      from=0, to = 20,
+        col="blue",add=TRUE)
+
+legend("topright",c("No mobility", " Mobility"), col=c("red","blue"),lwd=2)
+
+
+```
+
+```{r}
+subdatos <- datos[ datos$Countryb=="italy" & datos$Q6=="Social Sciences",]
+S2 <- with(subdatos, Surv(time,status))
+
+plot(survfit(S2 ~ mobilityPDurG2, subdatos))
+
+curve(exp(-(exp(-mod9.step$coef[1] - mod9.step$coef[6]- mod9.step$coef[11]) * x)^(1/mod9.step$scale)),from=0, to=20,
+        col="red", add=TRUE)
+
+# Comparamos los mismos con movilidad
+curve(exp(-(exp(-mod9.step$coef[1] - mod9.step$coef[6]- mod9.step$coef[11]-mod9.step$coef[7]-mod9.step$coef[20]) * x)^(1/mod9.step$scale)),
+      from=0, to = 20,
+        col="blue",add=TRUE)
+
+legend("topright",c("No mobility", " Mobility"), col=c("red","blue"),lwd=2)
+
+
+```
+
+En españa
+
+```{r}
+subdatos <- datos[ datos$Countryb=="spain" & datos$Q6=="Social Sciences",]
+S2 <- with(subdatos, Surv(time,status))
+
+plot(survfit(S2 ~ mobilityPDurG2, subdatos))
+
+curve(exp(-(exp(-mod9.step$coef[1] - mod9.step$coef[6]- mod9.step$coef[14]) * x)^(1/mod9.step$scale)),from=0, to=20,
+        col="red", add=TRUE)
+
+# Comparamos los mismos con movilidad
+curve(exp(-(exp(-mod9.step$coef[1] - mod9.step$coef[6]- mod9.step$coef[14]-mod9.step$coef[7]-mod9.step$coef[23]) * x)^(1/mod9.step$scale)),
+      from=0, to = 20,
+        col="blue",add=TRUE)
+
+legend("topright",c("No mobility", " Mobility"), col=c("red","blue"),lwd=2)
+
+```
+
+uk 
+
+```{r}
+subdatos <- datos[ datos$Countryb=="united kingdom" & datos$Q6=="Social Sciences",]
+S2 <- with(subdatos, Surv(time,status))
+
+plot(survfit(S2 ~ mobilityPDurG2, subdatos))
+
+
+```
+
